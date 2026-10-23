@@ -72,7 +72,7 @@ def process_vision_ocr(image_bytes: bytes, api_key: str) -> list:
     b64_img = base64.b64encode(buf.getvalue()).decode("utf-8")
 
     res = groq_request({
-        "model": "meta-llama/llama-4-scout-17b-16e-instruct", 
+        "model": "qwen/qwen3.8-27b", 
         "messages": [{
             "role": "user",
             "content": [
@@ -125,7 +125,7 @@ async def convert_multiple_files(files: List[UploadFile] = File(...), api_key: s
 @app.post("/api/ai-assistant")
 async def ai_assistant_endpoint(req: PromptRequest):
     res = groq_request({
-        "model": "llama-3.1-8b-instant", 
+        "model": "meta-llama/llama-3.1-8b-instant", 
         "messages": [
             {
                 "role": "system",
