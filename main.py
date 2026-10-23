@@ -120,7 +120,7 @@ async def convert_multiple_files(files: List[UploadFile] = File(...), api_key: s
 @app.post("/api/ai-assistant")
 async def ai_assistant_endpoint(req: PromptRequest):
     res = groq_request({
-        "model": "llama-3.3-70b-versatile",
+        "model": "llama-3.1-8b-instant", 
         "messages": [
             {
                 "role": "system",
