@@ -6,11 +6,11 @@ import os
 import json
 import re
 import urllib.request
+import urllib.error
 import base64
 import pdfplumber
 from io import BytesIO
 from PIL import Image, ImageOps
-import urllib.error # Add this to the imports at the top
 
 app = FastAPI(title="Google Sheets AI Backend")
 
@@ -65,22 +65,29 @@ def process_vision_ocr(image_bytes: bytes, api_key: str) -> list:
     img = Image.open(BytesIO(image_bytes))
     img = ImageOps.exif_transpose(img)
     if img.mode != "RGB": img = img.convert("RGB")
-    if max(img.size) > 1600: img.thumbnail((1600, 1600), Image.Resampling.LANCZOS)
+    img.thumbnail((800, 800), Image.Resampling.LANCZOS)
     
     buf = BytesIO()
-    img.save(buf, format="JPEG", quality=85)
+    img.save(buf, format="JPEG", quality=80)
     b64_img = base64.b64encode(buf.getvalue()).decode("utf-8")
 
     res = groq_request({
-        "model": "llama-3.2-90b-vision-preview", 
+        "model": "meta-llama/llama-4-scout-17b-16e-instruct", 
         "messages": [{
             "role": "user",
             "content": [
-                {"type": "text", "text": "Extract all tables, text, and handwritten data. Return ONLY a valid JSON object in this exact format: {\"rows\": [[\"Header1\", \"Header2\"], [\"Data1\", \"Data2\"]]}"},
-                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}}
+                {
+                    "type": "text", 
+                    "text": "Extract all tables, text, and handwritten data. Return ONLY a valid JSON object in this exact format: {\"rows\": [[\"Header1\", \"Header2\"], [\"Data1\", \"Data2\"]]}"
+                },
+                {
+                    "type": "image_url", 
+                    "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}
+                }
             ]
         }],
-        "temperature": 0.0
+        "temperature": 0.1,
+        "max_tokens": 4096
     }, api_key)
     
     parsed = parse_json_safely(res["choices"][0]["message"]["content"])
@@ -108,13 +115,11 @@ async def convert_multiple_files(files: List[UploadFile] = File(...), api_key: s
     for file in files:
         raw_bytes = await file.read()
         is_pdf = file.filename.lower().endswith(".pdf")
-        
         rows = extract_pdf(raw_bytes) if is_pdf else process_vision_ocr(raw_bytes, api_key)
         if rows:
             if all_rows and len(rows) > 1 and [str(x).upper() for x in all_rows[0]] == [str(x).upper() for x in rows[0]]:
                 rows = rows[1:]
             all_rows.extend(rows)
-            
     return {"reply": f"✅ Processed {len(files)} files.", "rows": all_rows}
 
 @app.post("/api/ai-assistant")
