@@ -124,11 +124,12 @@ async def ai_assistant_endpoint(req: PromptRequest):
         "messages": [
             {
                 "role": "system",
-                "content": "You are a Google Sheets AI Copilot. Return ONLY a JSON object: {\"rows\": [[\"Col1\", \"Col2\"], [\"Val1\", \"Val2\"]]} containing the requested table, formulas, or analysis."
+                "content": "You are a Google Sheets AI Copilot. Return ONLY a valid JSON object in this exact format: {\"rows\": [[\"Col1\", \"Col2\"], [\"Val1\", \"Val2\"]]}"
             },
-            {"role": "user", "content": f"Current Sheet Data: {json.dumps(req.current_data[:50])}\nUser Command: {req.prompt}"}
+            {"role": "user", "content": f"Current Sheet Data: {json.dumps(req.current_data[:40])}\nUser Command: {req.prompt}\nRemember to output ONLY JSON."}
         ],
         "temperature": 0.1,
+        "max_tokens": 4096,
         "response_format": {"type": "json_object"}
     }, req.api_key)
     
