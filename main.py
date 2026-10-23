@@ -126,7 +126,7 @@ async def unified_copilot(
     api_key: str = Form(...),
     prompt: str = Form(""),
     current_data: str = Form("[]"),
-    files: Optional[List[UploadFile]] = File(default=None)
+    files: List[UploadFile] = File(default=[])
 ):
     try:
         sheet_rows = json.loads(current_data) if current_data else []
@@ -134,7 +134,7 @@ async def unified_copilot(
         sheet_rows = []
 
     system_instruction = (
-        "You are an intelligent Google Sheets AI Copilot designed for beginners. "
+        "You are an intelligent Google Sheets AI Copilot designed for beginners as well as professionals to automate works. "
         "You can both edit data AND trigger Google Sheets tools automatically.\n"
         "You MUST return ONLY a valid JSON object in this exact format:\n"
         "{\n"
@@ -166,24 +166,25 @@ async def unified_copilot(
     ]
 
     has_images = False
-    if files:
-        for file in files:
-            if not file.filename:
-                continue
-            raw_bytes = await file.read()
-            if file.filename.lower().endswith(".pdf"):
-                pdf_content = extract_pdf_text_and_tables(raw_bytes)
-                content_blocks.append({
-                    "type": "text",
-                    "text": f"Extracted PDF Data ({file.filename}):\n{pdf_content[:6000]}"
-                })
-            else:
-                b64_img = image_to_base64(raw_bytes)
-                content_blocks.append({
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}
-                })
-                has_images = True
+    for file in files:
+        if not file or not file.filename:
+            continue
+        raw_bytes = await file.read()
+        if not raw_bytes:
+            continue
+        if file.filename.lower().endswith(".pdf"):
+            pdf_content = extract_pdf_text_and_tables(raw_bytes)
+            content_blocks.append({
+                "type": "text",
+                "text": f"Extracted PDF Data ({file.filename}):\n{pdf_content[:6000]}"
+            })
+        else:
+            b64_img = image_to_base64(raw_bytes)
+            content_blocks.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}
+            })
+            has_images = True
 
     res = groq_request_with_fallback(
         messages=[{"role": "user", "content": content_blocks}],
