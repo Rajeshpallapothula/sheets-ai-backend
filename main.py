@@ -72,16 +72,15 @@ def process_vision_ocr(image_bytes: bytes, api_key: str) -> list:
     b64_img = base64.b64encode(buf.getvalue()).decode("utf-8")
 
     res = groq_request({
-        "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+        "model": "llama-3.2-90b-vision-preview", 
         "messages": [{
             "role": "user",
             "content": [
-                {"type": "text", "text": "Extract all tables, text, and handwritten data. Return ONLY a JSON object: {\"rows\": [[\"Header1\", \"Header2\"], [\"Data1\", \"Data2\"]]}"},
+                {"type": "text", "text": "Extract all tables, text, and handwritten data. Return ONLY a valid JSON object in this exact format: {\"rows\": [[\"Header1\", \"Header2\"], [\"Data1\", \"Data2\"]]}"},
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}}
             ]
         }],
-        "temperature": 0.0,
-        "response_format": {"type": "json_object"}
+        "temperature": 0.0
     }, api_key)
     
     parsed = parse_json_safely(res["choices"][0]["message"]["content"])
