@@ -10,6 +10,7 @@ import base64
 import pdfplumber
 from io import BytesIO
 from PIL import Image, ImageOps
+import urllib.error # Add this to the imports at the top
 
 app = FastAPI(title="Google Sheets AI Backend")
 
@@ -39,8 +40,16 @@ def groq_request(payload_dict: dict, api_key: str) -> dict:
             "User-Agent": "Mozilla/5.0",
         },
     )
-    with urllib.request.urlopen(req, timeout=50) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(req, timeout=50) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        error_msg = e.read().decode("utf-8")
+        print(f"Groq API Error: {error_msg}")
+        raise HTTPException(status_code=400, detail=f"Groq Error: {error_msg}")
+    except Exception as e:
+        print(f"Server Error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Server Error: {str(e)}")
 
 def parse_json_safely(raw_text: str) -> dict:
     cleaned = raw_text.replace("```json", "").replace("```", "").strip()
