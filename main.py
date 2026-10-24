@@ -21,7 +21,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Automatic fallback lists so retired or rate-limited models never break your app
+# High-speed model priority chain
 TEXT_MODELS = [
     "meta-llama/llama-4-scout-17b-16e-instruct",
     "llama-3.3-70b-versatile",
@@ -38,7 +38,7 @@ VISION_MODELS = [
 
 @app.get("/")
 async def health_check():
-    return {"status": "online", "message": "Google Sheets AI Copilot Backend is Live!"}
+    return {"status": "online", "message": "Server is awake and ready!"}
 
 def groq_request_with_fallback(messages: list, api_key: str, is_vision: bool = False) -> dict:
     clean_key = (api_key or "").strip()
@@ -53,7 +53,7 @@ def groq_request_with_fallback(messages: list, api_key: str, is_vision: bool = F
             "model": model_name,
             "messages": messages,
             "temperature": 0.1,
-            "max_tokens": 4096
+            "max_tokens": 2048
         }
         url = "https://api.groq.com/openai/v1/chat/completions"
         payload = json.dumps(payload_dict).encode("utf-8")
@@ -67,20 +67,17 @@ def groq_request_with_fallback(messages: list, api_key: str, is_vision: bool = F
             },
         )
         try:
-            with urllib.request.urlopen(req, timeout=55) as resp:
+            with urllib.request.urlopen(req, timeout=45) as resp:
                 return json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
             error_msg = e.read().decode("utf-8")
             last_error = f"HTTP {e.code}: {error_msg}"
-            print(f"Model {model_name} failed with {last_error}")
 
-            # Immediately stop if the API key itself is invalid/unauthorized
             if e.code == 401 or "invalid_api_key" in error_msg.lower():
                 raise HTTPException(
                     status_code=401,
                     detail="Unauthorized API Key. Please generate a fresh key on Groq Console and click Save."
                 )
-            # If model is not found, decommissioned, or rate-limited, automatically try the next model
             if e.code in (400, 404, 429) or "model" in error_msg.lower() or "rate_limit" in error_msg.lower():
                 continue
             raise HTTPException(status_code=400, detail=f"Groq Error: {error_msg}")
@@ -97,7 +94,7 @@ def parse_json_safely(raw_text: str) -> dict:
         if isinstance(data, dict):
             return data
         if isinstance(data, list):
-            return {"reply": "✅ Updated spreadsheet.", "action": "UPDATE_DATA", "rows": data}
+            return {"reply": "✅ Created your template!", "action": "DIRECT_TEMPLATE", "rows": data}
     except:
         pass
 
@@ -114,10 +111,9 @@ def image_to_base64(image_bytes: bytes) -> str:
     img = ImageOps.exif_transpose(img)
     if img.mode != "RGB":
         img = img.convert("RGB")
-    # Downscale to 850x850 so base64 payload never triggers a 400 Bad Request
-    img.thumbnail((850, 850), Image.Resampling.LANCZOS)
+    img.thumbnail((800, 800), Image.Resampling.LANCZOS)
     buf = BytesIO()
-    img.save(buf, format="JPEG", quality=80)
+    img.save(buf, format="JPEG", quality=75)
     return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 def extract_pdf_text_and_tables(pdf_bytes: bytes) -> str:
@@ -161,39 +157,38 @@ async def unified_copilot(
         history_list = []
 
     system_instruction = (
-        "You are a human-aware Google Sheets AI Copilot and Official Template Designer for beginners.\n"
-        "You understand the spreadsheet like a human—by its Title Banner, Instructions Box, Subheadings Row, and Data Rows—so the user never needs to mention cell coordinates like A1 or B4.\n"
-        "You also remember what you just created or edited from the Recent Conversation Memory.\n\n"
-        "You MUST return ONLY a raw valid JSON object in this exact structure:\n"
+        "You are a fast, human-aware Google Sheets AI Copilot and Universal Template Architect.\n"
+        "Instead of offering fixed templates, you dynamically design custom, official-style Google Sheets templates for ANY user intention (timetables, study planners, business trackers, budgets, workouts, inventories, event schedules, logs, or OCR extractions).\n"
+        "You also understand the sheet like a human—by its Title Banner, Instructions Box, Subheadings Row, and Data Rows—so the user never needs to mention cell coordinates like A1.\n\n"
+        "Return ONLY a raw valid JSON object in this exact structure:\n"
         "{\n"
-        "  \"reply\": \"Friendly explanation of what you did\",\n"
-        "  \"action\": \"OPEN_TEMPLATE | UPDATE_SUBHEADINGS | UPDATE_TITLE | UPDATE_DATA | OPEN_TEMPLATE_GALLERY | CLEAR_SHEET | NEW_FILE | NEW_TAB | FORMAT_TABLE | FREEZE_HEADER | SORT_ASC | SORT_DESC | REMOVE_DUPLICATES\",\n"
-        "  \"target_name\": \"Optional tab or file name\",\n"
-        "  \"template_title\": \"LARGE BANNER TITLE (e.g., ATTENDANCE TRACKER)\",\n"
-        "  \"template_instructions\": \"Short helper instructions for the top-right box\",\n"
+        "  \"reply\": \"Brief, friendly confirmation of what you built or updated\",\n"
+        "  \"action\": \"DIRECT_TEMPLATE | UPDATE_SUBHEADINGS | UPDATE_TITLE | OPEN_TEMPLATE_GALLERY | CLEAR_SHEET | NEW_FILE | NEW_TAB | FORMAT_TABLE | FREEZE_HEADER | SORT_ASC | SORT_DESC | REMOVE_DUPLICATES\",\n"
+        "  \"target_name\": \"Short clean tab or file name\",\n"
+        "  \"template_title\": \"LARGE BANNER TITLE MATCHING USER INTENT\",\n"
+        "  \"template_instructions\": \"1-2 helpful sentences explaining how to use this custom sheet\",\n"
         "  \"new_subheadings\": [\"Col1\", \"Col2\"],\n"
-        "  \"dropdowns\": {\"Status\": [\"Present\", \"Absent\", \"Late\"]},\n"
-        "  \"preserve_template_style\": true,\n"
-        "  \"rows\": [[\"Subheading1\", \"Subheading2\"], [\"Row1Val1\", \"Row1Val2\"]]\n"
+        "  \"dropdowns\": {\"ColumnName\": [\"Option1\", \"Option2\", \"Option3\"]},\n"
+        "  \"rows\": [[\"Subheading1\", \"Subheading2\"], [\"Sample1\", \"Sample2\"]]\n"
         "}\n\n"
-        "CRITICAL ROUTING RULES:\n"
-        "1. OFFICIAL TEMPLATE GALLERY: If the user says 'go to template gallery', 'open template gallery', or 'browse official templates', set action=\"OPEN_TEMPLATE_GALLERY\" and rows=[]. Do NOT generate a table of template names.\n"
-        "2. OFFICIAL TEMPLATES (e.g., 'attendance tracker', 'assignment tracker', 'budget', 'invoice', 'project tracker'): Set action=\"OPEN_TEMPLATE\", set 'target_name' to a clean tab name, set 'template_title', write helpful 'template_instructions', define 'dropdowns' for status/category/priority columns, and provide realistic sample 'rows' where rows[0] is the subheadings array and rows[1..] are sample data rows.\n"
-        "3. HUMAN MEMORY & SUBHEADING EDITS: If the user refers to the table just created (e.g., 'add a word to the subheadings', 'change the subheadings of the table we just made', 'rename the second column'), check 'landmarks.current_subheadings' and 'Recent Conversation Memory'. Set action=\"UPDATE_SUBHEADINGS\" and put the full updated list of column headers into 'new_subheadings'.\n"
-        "4. HUMAN CELL/ROW EDITS (e.g., 'put English in Tuesday period 1', 'mark Bob Smith as Present', 'add 3 more rows'): Read the existing table from 'table_rows' in Current Sheet Landmarks, apply the exact change requested while keeping all other existing rows intact, and return the complete updated table in 'rows' with action=\"UPDATE_DATA\".\n"
-        "5. SHEET TOOLS: Use CLEAR_SHEET, NEW_FILE, NEW_TAB, FORMAT_TABLE, FREEZE_HEADER, SORT_ASC, SORT_DESC, or REMOVE_DUPLICATES when the user asks for those tools.\n"
-        "6. Output raw JSON only, without markdown code fences."
+        "CRITICAL RULES:\n"
+        "1. DIRECT OFFICIAL TEMPLATE BY DEFAULT: Whenever the user asks to create, generate, track, schedule, plan, organize, or modify a table/timetable/template/sheet (or extracts from a photo/PDF), ALWAYS use action=\"DIRECT_TEMPLATE\". Never output an unstyled plain table first.\n"
+        "2. TAILOR TO USER INTENTION: Design 'rows[0]' (the subheadings), 'rows[1..]' (3 to 5 realistic starter rows), 'template_title', 'template_instructions', and 'dropdowns' (for any status, category, priority, day, or type column) specifically around the user's goal.\n"
+        "3. IN-PLACE HUMAN EDITS: If a template is already on the sheet (check 'landmarks.table_rows') and the user asks to edit a cell or row (e.g., 'put English in Tuesday period 1', 'add a row for John'), keep the existing template structure, apply the exact edit to 'rows', preserve 'template_title' and 'template_instructions', and return action=\"DIRECT_TEMPLATE\".\n"
+        "4. SUBHEADING EDITS: If the user asks to change, rename, or add a word to the subheadings of the table just created, set action=\"UPDATE_SUBHEADINGS\" and provide the full updated header list in 'new_subheadings'.\n"
+        "5. OFFICIAL TEMPLATE GALLERY: Only if the user explicitly says 'go to template gallery' or 'open official google template gallery', set action=\"OPEN_TEMPLATE_GALLERY\" and rows=[].\n"
+        "6. Output raw JSON only, with no markdown code fences."
     )
 
-    user_instruction = prompt if prompt else "Extract all tables, text, and handwritten data cleanly into structured spreadsheet rows."
+    user_instruction = prompt if prompt else "Extract all data into a clean, structured official template matching the content."
     content_blocks = [
         {
             "type": "text",
             "text": (
                 f"{system_instruction}\n\n"
-                f"Recent Conversation Memory: {json.dumps(history_list)}\n\n"
-                f"Current Sheet Landmarks & Data: {json.dumps(sheet_context)}\n\n"
-                f"User Command: {user_instruction}"
+                f"Recent Memory: {json.dumps(history_list[-4:])}\n"
+                f"Current Sheet Landmarks: {json.dumps(sheet_context.get('landmarks', {}))}\n"
+                f"User Request: {user_instruction}"
             )
         }
     ]
@@ -209,7 +204,7 @@ async def unified_copilot(
             pdf_content = extract_pdf_text_and_tables(raw_bytes)
             content_blocks.append({
                 "type": "text",
-                "text": f"Attached PDF Content ({file.filename}):\n{pdf_content[:6000]}"
+                "text": f"Attached PDF ({file.filename}):\n{pdf_content[:5000]}"
             })
         else:
             b64_img = image_to_base64(raw_bytes)
@@ -227,13 +222,12 @@ async def unified_copilot(
 
     parsed = parse_json_safely(res["choices"][0]["message"]["content"])
     return {
-        "reply": parsed.get("reply", "✅ Done!"),
-        "action": parsed.get("action", "UPDATE_DATA"),
+        "reply": parsed.get("reply", "✅ Template ready!"),
+        "action": parsed.get("action", "DIRECT_TEMPLATE"),
         "target_name": parsed.get("target_name", ""),
         "template_title": parsed.get("template_title", ""),
         "template_instructions": parsed.get("template_instructions", ""),
         "new_subheadings": parsed.get("new_subheadings", []),
         "dropdowns": parsed.get("dropdowns", {}),
-        "preserve_template_style": parsed.get("preserve_template_style", False),
         "rows": parsed.get("rows", [])
     }
